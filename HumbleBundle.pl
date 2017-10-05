@@ -56,10 +56,6 @@ for my $order ( @{$ordersList} ) {
 }
 die 'The End';
 
-
-# TODO Replace this bit with actually downloading the JSON file from the API
-#my $str = do { local $/; <STDIN> };
-
 my $data;
 for my $book ( @{$data->{subproducts}} ) {
 
