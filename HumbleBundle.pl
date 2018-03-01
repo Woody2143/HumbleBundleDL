@@ -1,4 +1,4 @@
-#!/home/bwood/perl5/perlbrew/perls/perl-5.22.0/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
 use warnings;
@@ -6,11 +6,12 @@ use Modern::Perl;
 use JSON::Parse 'parse_json';
 use Data::Dumper;
 use LWP::UserAgent ();
-use Digest::MD5 qw(md5_hex);
+use Digest::MD5 qw(md5 md5_hex);
 use Config::Simple;
+use File::Copy;
 
 my $cfg;
-my @cfgParams = qw(sessionCookie);
+my @cfgParams = qw(sessionCookie saveDir);
 
 if ( -f '.humbleBundle.cfg' ) {
     print "\nReading config file .humbleBundle.cfg \n\n";
@@ -25,6 +26,7 @@ for my $param (@cfgParams) {
 }
 
 my $session = $cfg->param('sessionCookie');
+my $saveDir = $cfg->param('saveDir');
 
 my $ua = LWP::UserAgent->new();
 #$ua->default_header('X-Requested-By' => 'hb_android_app');
@@ -44,11 +46,9 @@ if ( $allOrdersResponse->is_success  ) {
 
 my %items;
 
-print 'Getting Bundles ';
+say 'Getting Bundles ';
 
 for my $order ( @{$ordersList} ) {
-
-    print '.';
 
     my $getOrderURL = 'https://www.humblebundle.com/api/v1/order/' . $order->{gamekey};
     my $orderResponse = $ua->get($getOrderURL, Cookie => $cookie );
@@ -58,11 +58,8 @@ for my $order ( @{$ordersList} ) {
         $orderDetails = parse_json $orderResponse->decoded_content;
     }
 
-    ( my $dirName = $orderDetails->{product}->{human_name} ) =~ s/\s+/_/g;
+    my $dirName = NameCleanUp( $orderDetails->{product}->{human_name} );
 
-    $dirName =~ s/(:|,|_\|\|)/_-/g;
-    $dirName =~ s/('|!)//g;
-    $dirName =~ s/&/and/g;
     $items{$order->{gamekey}} = {
         name    => $orderDetails->{product}->{human_name},
         created => $orderDetails->{created},
@@ -71,7 +68,7 @@ for my $order ( @{$ordersList} ) {
     };
 
 }
-print "\n";
+
 say 'Sorting Bundles';
 foreach my $key (sort { $items{$a}->{created} cmp $items{$b}->{created} } (keys %items) ) {
     say $key . ' - ' . $items{$key}->{created} . ' - ' .  $items{$key}->{name};
@@ -90,7 +87,7 @@ while ($question == 0) {
 
 for my $key (@keys) {
 
-    my $dir = '/home/bwood/Dropbox/Books/' . $items{$key}{dir};
+    my $dir = $saveDir . '/' . $items{$key}{dir};
     if (-e $dir && -d $dir) {
         say "$dir exists";
     } else {
@@ -103,17 +100,38 @@ for my $key (@keys) {
     for my $book ( @{$items{$key}{books}} ) {
 
         if ( @{$book->{downloads}} ) {
-            ( my $filename = $book->{human_name} ) =~ s/\s+/_/g;
 
-            $filename =~ s/(:|,|_\|\|)/_-/g;
-            $filename =~ s/('|!)//g;
-            $filename =~ s/&/and/g;
+            my $filename = NameCleanUp( $book->{human_name} );
+
             say "  Working on $filename -";
 
             for my $file ( @{$book->{downloads}->[0]->{download_struct}} ) {
 
                 my $ext = lc $file->{name};
                 say "    Working on $ext -";
+
+                my $fullFilename = $filename . '.' . $ext;
+                my $save = "$dir/$fullFilename";
+
+                if ( -e $save ) {
+                    say "      File Exists!";
+                    say "        Checking MD5!";
+                    open (my $fh, '<', $save) or die "Can't open '$save': $!";
+                    binmode($fh);
+                    my $md5 = Digest::MD5->new;
+                    while (<$fh>) {
+                        $md5->add($_);
+                    }
+                    close($fh);
+                    my $md5FileHEX = $md5->hexdigest;
+
+                    if ( $md5FileHEX eq $file->{md5} ) {
+                        say "          MD5 Hash Matches!";
+                        next;
+                    } else {
+                        say "          MD5 Hash doesn't match!";
+                    }
+                }
 
                 my $url = $file->{url}->{web};
 
@@ -128,9 +146,6 @@ for my $key (@keys) {
                 if ( $md5HEX eq $file->{md5} ) {
                     say "      md5 values match";
 
-                    my $fullFilename = $filename . '.' . $ext;
-                    my $save = "$dir/$fullFilename";
-
                     unless(open SAVE, '>'.$save) {
                         die "      Cannot create save file '$save'\n";
                     }
@@ -141,10 +156,26 @@ for my $key (@keys) {
                     say "      md5 values does not match!";
                     say "        " . $file->{md5} . " - md5 from JSON";
                     say "        $md5HEX - downloaded File";
+                    die;
                 }
             }
 
         }
 
     }
+}
+
+sub NameCleanUp {
+    my ($name) = @_;
+
+    ( my $cleanName = $name ) =~ s/\s+/_/g;
+
+    $cleanName =~ s/\/|\)|:|,|_\|\|/_-/g;
+    $cleanName =~ s/\(/-_/g;
+    $cleanName =~ s/\.|'|’|!|//g;
+    $cleanName =~ s/&/and/g;
+    $cleanName =~ s/#/Num_/g;
+    $cleanName =~ s/_-$//;
+
+    return $cleanName;
 }
