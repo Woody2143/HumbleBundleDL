@@ -28,6 +28,8 @@ for my $param (@cfgParams) {
 my $session = $cfg->param('sessionCookie');
 my $saveDir = $cfg->param('saveDir');
 
+my $max_file_size = 4294967296;  # 4GB, just to pick a number
+
 my $ua = LWP::UserAgent->new();
 #$ua->default_header('X-Requested-By' => 'hb_android_app');
 #$ua->add_handler("request_send",  sub { shift->dump; return });
@@ -66,13 +68,15 @@ for my $order ( @{$ordersList} ) {
         dir     => $dirName,
         books   => $orderDetails->{subproducts}
     };
-
 }
 
 say 'Sorting Bundles';
 foreach my $key (sort { $items{$a}->{created} cmp $items{$b}->{created} } (keys %items) ) {
     say $key . ' - ' . $items{$key}->{created} . ' - ' .  $items{$key}->{name};
 }
+
+say "\nEnter each desired bundle, one per line, entering an empty line when done:\n";
+
 my @keys;
 my $question = 0;
 while ($question == 0) {
@@ -95,7 +99,7 @@ for my $key (@keys) {
         say "$dir created!";
     }
 
-    say 'Working on bundle: ' . $items{$key}{name};
+    say 'Working on bundle: ' . $items{$key}{name} . ' (key ' . $key . ')';
 
     for my $book ( @{$items{$key}{books}} ) {
 
@@ -108,9 +112,22 @@ for my $key (@keys) {
             for my $file ( @{$book->{downloads}->[0]->{download_struct}} ) {
 
                 my $ext = lc $file->{name};
+                if ( $ext eq "stream" ) {
+                    say "    Skipping $ext";
+                    next;
+                }
+                if ($file->{file_size} > $max_file_size) {
+                    say "    Skipping $ext because file is too big at " . $file->{human_size};
+                    next;
+                }
+
                 say "    Working on $ext -";
 
+                my $url = $file->{url}->{web};
                 my $fullFilename = $filename . '.' . $ext;
+                if ( $url =~ /.*\.zip\?.*/ ) {
+                    $fullFilename = $fullFilename . ".zip";
+                }
                 my $save = "$dir/$fullFilename";
 
                 if ( -e $save ) {
@@ -132,8 +149,6 @@ for my $key (@keys) {
                         say "          MD5 Hash doesn't match!";
                     }
                 }
-
-                my $url = $file->{url}->{web};
 
                 say   "      downloading";
                 $ua->show_progress(1);
@@ -159,9 +174,7 @@ for my $key (@keys) {
                     die;
                 }
             }
-
         }
-
     }
 }
 
