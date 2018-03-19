@@ -94,6 +94,7 @@ foreach my $key (sort { $items{$a}->{created} cmp $items{$b}->{created} } (keys 
                         if ( $fullFilename =~ /(480|720|1080)p$/ ) {
                             $fullFilename = $fullFilename . ".mp4";
                         }
+                        $fullFilename =~ s/\.pdf \((.+)\)$/.$1.pdf/;
                     }
                     my $save = "$dir/$fullFilename";
 
@@ -107,17 +108,19 @@ foreach my $key (sort { $items{$a}->{created} cmp $items{$b}->{created} } (keys 
 sub NameCleanUp {
     my ($name) = @_;
 
-    ( my $cleanName = $name ) =~ s/\s+/_/g; # Could make space replacement optional
+    ( my $cleanName = $name ) =~ s/^\s+|\s+$//g; # Trim the string
 
-    $cleanName =~ s/\/|\)|:|,|_\|\|/_-/g;
-    $cleanName =~ s/\(/-_/g;
-    $cleanName =~ s/\N{U+2018}|\N{U+2019}|\N{U+201A}/'/g;
-    $cleanName =~ s/\N{U+201C}|\N{U+201D}|\N{U+201F}/"/g;
-    $cleanName =~ s/\.|!|//g;
-    $cleanName =~ s/'//g; # Could make quote removal optional
-    $cleanName =~ s/&/and/g;
-    $cleanName =~ s/#/Num_/g;
-    $cleanName =~ s/_-$//;
+    $cleanName =~ s/\/|\(|\)|:|,| \|\|/ - /g; # Replace slash, paren, colon, comma, and pipe-pipe with a dash
+    $cleanName =~ s/\N{U+2018}|\N{U+2019}|\N{U+201A}/'/g; # Replace Unicode single-quote with '
+    $cleanName =~ s/\N{U+201C}|\N{U+201D}|\N{U+201F}/"/g; # Replace Unicode double-quote with "
+    $cleanName =~ s/\.|!//g;    # Eliminate period and exclamation point
+    $cleanName =~ s/&/ and /g;  # Replace ampersand with the word "and"
+    $cleanName =~ s/#/ Num /g;  # Replace number sign with the word "Num"
+    $cleanName =~ s/\s*-\s*$//; # Remove a trailing dash
+    $cleanName =~ s/\s\s+/ /g;  # Collapse consecutive whitespace
+
+    $cleanName =~ s/'//g;       # remove single quotes (comment out to prevent)
+    $cleanName =~ s/ /_/g;      # replace space with underscore (comment out to prevent)
 
     return $cleanName;
 }
