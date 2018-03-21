@@ -23,4 +23,4 @@ Contributions very much welcome.
 * Make the script portable between OS types? Not important to me exactly, but I'm sure someone else would like it
 * Handle huge file sizes and make maximum file size configurable
 * Make it possible to download only certain file types, or to skip certain file types
-* Optionally skip errors, keeping track and reporting failures at the end
+* Maybe make the save directory if it does not exist
