@@ -4,11 +4,8 @@ use strict;
 use warnings;
 use Modern::Perl;
 use JSON::Parse 'parse_json';
-use Data::Dumper;
 use LWP::UserAgent ();
-use Digest::MD5 qw(md5 md5_hex);
 use Config::Simple;
-use File::Copy;
 
 binmode(STDOUT, ":utf8");
 
@@ -50,7 +47,7 @@ if ( $allOrdersResponse->is_success  ) {
 
 my %items;
 
-say 'Getting Bundles ';
+say 'Getting Bundles';
 
 for my $order ( @{$ordersList} ) {
     my $getOrderURL = 'https://www.humblebundle.com/api/v1/order/' . $order->{gamekey};
@@ -71,38 +68,51 @@ for my $order ( @{$ordersList} ) {
     };
 }
 
+say 'Listing Bundles';
+
 foreach my $key (sort { $items{$a}->{created} cmp $items{$b}->{created} } (keys %items) ) {
     my $dir = $saveDir . '/' . $items{$key}{dir};
 
-    say 'Bundle: ' . $items{$key}{name} . ' (key ' . $key . ')';
+    say 'Bundle: ' . $items{$key}{name} . ' (key ' . $key . '):';
 
     for my $book ( @{$items{$key}{books}} ) {
         my @downloads = @{$book->{downloads}};
         if ( @downloads ) {
             my $filename = NameCleanUp( $book->{human_name} );
-            say "  $filename -";
+            say "  $filename:";
 
             for (my $i=0; $i < scalar @downloads; $i++) {
                 for my $file ( @{$downloads[$i]->{download_struct}} ) {
                     my $ext = lc $file->{name};
                     my $url = $file->{url}->{web};
-                    my $fullFilename = $filename . '.' . $ext;
-                    if ( defined $file->{file_size} ) {
-                        if ( $url =~ /.*\.zip\?.*/ ) {
-                            $fullFilename = $fullFilename . ".zip";
-                        }
-                        if ( $fullFilename =~ /(480|720|1080)p$/ ) {
-                            $fullFilename = $fullFilename . ".mp4";
-                        }
-                        $fullFilename =~ s/\.pdf \((.+)\)$/.$1.pdf/;
-                    }
-                    my $save = "$dir/$fullFilename";
 
-                    say "    $fullFilename " . $file->{human_size};
+                    # Don't list things with no download
+                    if ( !defined $url ) {
+                        next;
+                    }
+
+                    my $fullFilename = FixExtension($filename, $ext, $url);
+                    my $save = "$dir/$fullFilename";
+                    say "    $fullFilename - " . $file->{human_size};
                 }
             }
         }
     }
+}
+
+sub FixExtension {
+    my ($filename, $ext, $url) = @_;
+
+    my $fullFilename = $filename . '.' . $ext;
+    if ( $url =~ /.*\.zip\?.*/ ) {
+        $fullFilename = $fullFilename . ".zip";
+    }
+    if ( $fullFilename =~ /(480|720|1080)p$/ ) {
+        $fullFilename = $fullFilename . ".mp4";
+    }
+    $fullFilename =~ s/\.pdf \((.+)\)$/.$1.pdf/;
+
+    return $fullFilename;
 }
 
 sub NameCleanUp {
@@ -110,7 +120,7 @@ sub NameCleanUp {
 
     ( my $cleanName = $name ) =~ s/^\s+|\s+$//g; # Trim the string
 
-    $cleanName =~ s/\/|\(|\)|:|,| \|\|/ - /g; # Replace slash, paren, colon, comma, and pipe-pipe with a dash
+    $cleanName =~ s/[\/():,|]+/ - /g; # Replace sequences of slash, paren, colon, comma, and pipe with a dash
     $cleanName =~ s/\N{U+2018}|\N{U+2019}|\N{U+201A}/'/g; # Replace Unicode single-quote with '
     $cleanName =~ s/\N{U+201C}|\N{U+201D}|\N{U+201F}/"/g; # Replace Unicode double-quote with "
     $cleanName =~ s/\.|!//g;    # Eliminate period and exclamation point

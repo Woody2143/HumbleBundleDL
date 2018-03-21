@@ -92,18 +92,17 @@ while ($question == 0) {
 }
 
 my @skipped;
+my @errors;
 my $nDownloaded=0;
-my $nSkipped=0;
 my $nChecked=0;
 my $nCheckFail=0;
 
 for my $key (@keys) {
-
     my $dir = $saveDir . '/' . $items{$key}{dir};
     if (-e $dir && -d $dir) {
         say "$dir exists";
     } else {
-        mkdir $dir or die "ERROR: Cannot create $dir!";
+        mkdir $dir or die "ERROR: Cannot create $dir - $!!";
         say "$dir created!";
     }
 
@@ -119,57 +118,40 @@ for my $key (@keys) {
             for (my $i=0; $i < scalar @downloads; $i++) {
                 for my $file ( @{$downloads[$i]->{download_struct}} ) {
                     my $ext = lc $file->{name};
-                    if ( $ext eq "stream" ) {
+                    my $url = $file->{url}->{web};
+                    if ( $ext eq "stream" || !defined $url ) {
                         say "    Skipping $ext";
                         next;
                     }
 
                     say "    Working on $ext -";
 
-                    my $url = $file->{url}->{web};
-                    my $fullFilename = $filename . '.' . $ext;
-                    if ( $url =~ /.*\.zip\?.*/ ) {
-                        $fullFilename = $fullFilename . ".zip";
-                    }
-                    if ( $fullFilename =~ /(480|720|1080)p$/ ) {
-                        $fullFilename = $fullFilename . ".mp4";
-                    }
-                    $fullFilename =~ s/\.pdf \((.+)\)$/.$1.pdf/;
+                    my $fullFilename = FixExtension($filename, $ext, $url);
                     my $save = "$dir/$fullFilename";
 
                     if ( -e $save ) {
                         say "      File Exists!";
-                        say "        Checking MD5!";
-                        open (my $fh, '<', $save) or die "Can't open '$save': $!";
-                        binmode($fh);
-                        my $md5 = Digest::MD5->new;
-                        while (<$fh>) {
-                            $md5->add($_);
-                        }
-                        close($fh);
-                        my $md5FileHEX = $md5->hexdigest;
 
-                        if ( $md5FileHEX eq $file->{md5} ) {
-                            say "          MD5 Hash Matches!";
-                            $nChecked++;
+                        # Check to see if we will skip this file download, because we already have it and it's good
+                        if (CheckFileMD5($save, $file)) {
                             next;
-                        } else {
-                            say "          MD5 Hash doesn't match! (will redownload)";
-                            $nCheckFail++;
                         }
                     }
 
-                    if ($file->{file_size} > $max_file_size) {
+                    if ( defined $file->{file_size} && $file->{file_size} > $max_file_size ) {
                         say "    Skipping $ext because file is too big at " . $file->{human_size};
-                        push @skipped, $book;
-                        $nSkipped++;
+                        push @skipped, "File $filename version $ext was too big: " . $file->{human_size};
                         next;
                     }
 
                     say "      downloading";
                     $ua->show_progress(1);
                     my $fileResponse = $ua->get($url);
-                    die $fileResponse->status_line if !$fileResponse->is_success;
+                    if (!$fileResponse->is_success) {
+                        say "      GET failed for $fullFilename with " . $fileResponse->status_line;
+                        push @errors, "GET failed for $fullFilename with " . $fileResponse->status_line;
+                        next;
+                    }
 
                     my $downloadedFile = $fileResponse->decoded_content( charset => 'none' );
                     my $md5HEX = md5_hex($downloadedFile);
@@ -177,8 +159,10 @@ for my $key (@keys) {
                     if ( $md5HEX eq $file->{md5} ) {
                         say "      md5 values match";
 
-                        unless(open SAVE, '>'.$save) {
-                            die "      Cannot create save file '$save'\n";
+                        unless(open SAVE, '>'. $save) {
+                            say "      Cannot create save file '$save' - $!\n";
+                            push @errors, "Cannot create save file '$save' - $!";
+                            next;
                         }
                         say "      Saving file: $fullFilename\n";
                         print SAVE $downloadedFile;
@@ -188,7 +172,7 @@ for my $key (@keys) {
                         say "      md5 values does not match!";
                         say "        " . $file->{md5} . " - md5 from JSON";
                         say "        $md5HEX - downloaded File";
-                        die;
+                        push @errors, "MD5 doesn't match after download for '$save'";
                     }
                 }
             }
@@ -200,12 +184,72 @@ for my $key (@keys) {
 say "\n$nDownloaded files downloaded successfully.";
 say "$nChecked files already existed and have the correct MD5.";
 say "$nCheckFail files failed the MD5 check and were redownloaded or skipped.";
+my $nSkipped = scalar @skipped;
 if ($nSkipped > 0) {
     say "$nSkipped files skipped due to being too large:";
-    for my $book ( @skipped ) {
-        my $filename = NameCleanUp( $book->{human_name} );
-        say "   $filename";
+    for my $complaint ( @skipped ) {
+        say "   $complaint";
     }
+}
+
+my $nErrors = scalar @errors;
+if ($nErrors > 0) {
+    say "$nErrors files or keys skipped due to errors:";
+    for my $complaint ( @errors ) {
+        say "   $complaint";
+    }
+}
+
+# Return 1 if we will skip downloading the file, 0 if we will download the file
+sub CheckFileMD5 {
+    my ($save, $file) = @_;
+    my $size = -s $save;
+    if ( $size != $file->{file_size} ) {
+        say "      File '$save' is the wrong size, $size != " . $file->{file_size} . " (will redownload)";
+        return 0;
+    }
+
+    say "        Checking MD5!";
+    my $fh;
+    unless ( open ($fh, '<', $save) ) {
+        say "Can't open file '$save' to check MD5: $!";
+        push @errors, "Can't open file '$save' to check MD5 - file skipped ($!)";
+        return 1;
+    }
+
+    binmode($fh);
+    my $md5 = Digest::MD5->new;
+    while (<$fh>) {
+        $md5->add($_);
+    }
+    close($fh);
+
+    my $md5FileHEX = $md5->hexdigest;
+
+    if ( $md5FileHEX eq $file->{md5} ) {
+        say "          MD5 Hash Matches!";
+        $nChecked++;
+        return 1;
+    } else {
+        say "          MD5 Hash doesn't match! (will redownload)";
+        $nCheckFail++;
+    }
+    return 0;
+}
+
+sub FixExtension {
+    my ($filename, $ext, $url) = @_;
+
+    my $fullFilename = $filename . '.' . $ext;
+    if ( $url =~ /.*\.zip\?.*/ ) {
+        $fullFilename = $fullFilename . ".zip";
+    }
+    if ( $fullFilename =~ /(480|720|1080)p$/ ) {
+        $fullFilename = $fullFilename . ".mp4";
+    }
+    $fullFilename =~ s/\.pdf \((.+)\)$/.$1.pdf/;
+
+    return $fullFilename;
 }
 
 sub NameCleanUp {
@@ -213,7 +257,7 @@ sub NameCleanUp {
 
     ( my $cleanName = $name ) =~ s/^\s+|\s+$//g; # Trim the string
 
-    $cleanName =~ s/\/|\(|\)|:|,| \|\|/ - /g; # Replace slash, paren, colon, comma, and pipe-pipe with a dash
+    $cleanName =~ s/[\/():,|]+/ - /g; # Replace sequences of slash, paren, colon, comma, and pipe with a dash
     $cleanName =~ s/\N{U+2018}|\N{U+2019}|\N{U+201A}/'/g; # Replace Unicode single-quote with '
     $cleanName =~ s/\N{U+201C}|\N{U+201D}|\N{U+201F}/"/g; # Replace Unicode double-quote with "
     $cleanName =~ s/\.|!//g;    # Eliminate period and exclamation point
