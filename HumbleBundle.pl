@@ -12,11 +12,12 @@ use File::Copy;
 
 binmode(STDOUT, ":utf8");
 my %ERRORS = (
-	list        => [],
-	skipped     => [],
-        checked     => 0,
-        checkedFail => 0,
+    list        => [],
+    skipped     => [],
+    checked     => 0,
+    checkedFail => 0,
 );
+my $DEFAULT_MAX_FILESIZE = 4294967296;
 
 # Return 1 if we will skip downloading the file, 0 if we will download the file
 sub CheckFileMD5 {
@@ -101,58 +102,53 @@ sub error {
 sub main{
     my $cfg;
     my @cfgParams = qw(sessionCookie saveDir);
-    
-    if ( -f '.humbleBundle.cfg' ) {
 
+    if ( -f '.humbleBundle.cfg' ) {
         print "\nReading config file .humbleBundle.cfg \n\n";
         $cfg = new Config::Simple('.humbleBundle.cfg');
-
     } else {
-
         print "\nConfig file, .humbleBundle.cfg, missing!\n";
         exit 1;
-
     }
-    
+
     for my $param (@cfgParams) {
        die "Please check your config file, $param is not set!" if (! $cfg->param($param));
     }
-    
+
     my $session = $cfg->param('sessionCookie');
     my $saveDir = $cfg->param('saveDir');
-    
-    my $max_file_size = $cfg->param('maxFileSize') // 4294967296;  # 4GB, just to pick a number
-    
+    my $max_file_size = $cfg->param('maxFileSize') || $DEFAULT_MAX_FILESIZE;
+
     my $ua = LWP::UserAgent->new();
-    
+
     my $getAllOrdersURL = 'https://www.humblebundle.com/api/v1/user/order';
-    
+
     my $cookie = '_simpleauth_sess="' . $session . '"';
-    
+
     my $allOrdersResponse = $ua->get($getAllOrdersURL, Cookie => $cookie );
-    
+
     my $ordersList;
 
     if ( $allOrdersResponse->is_success  ) {
         $ordersList = parse_json $allOrdersResponse->decoded_content;
     }
-    
+
     my %items;
-    
-    say 'Getting Bundles ';
-    
+
+    say 'Getting Bundles';
+
     for my $order ( @{$ordersList} ) {
-    
+
         my $getOrderURL = 'https://www.humblebundle.com/api/v1/order/' . $order->{gamekey};
         my $orderResponse = $ua->get($getOrderURL, Cookie => $cookie );
-    
+
         my $orderDetails;
         if ( $orderResponse->is_success  ) {
             $orderDetails = parse_json $orderResponse->decoded_content;
         }
-    
+
         my $dirName = NameCleanUp( $orderDetails->{product}->{human_name} );
-    
+
         $items{$order->{gamekey}} = {
             name    => $orderDetails->{product}->{human_name},
             created => $orderDetails->{created},
@@ -160,14 +156,14 @@ sub main{
             books   => $orderDetails->{subproducts}
         };
     }
-    
+
     say 'Sorting Bundles';
     foreach my $key (sort { $items{$a}->{created} cmp $items{$b}->{created} } (keys %items) ) {
         say $key . ' - ' . $items{$key}->{created} . ' - ' .  $items{$key}->{name};
     }
-    
+
     say "\nEnter each desired bundle, one per line, entering an empty line when done:\n";
-    
+
     my @keys;
     my $question = 0;
     while ($question == 0) {
@@ -179,9 +175,9 @@ sub main{
             $question = 1;
         }
     }
-    
+
     my $nDownloaded=0;
-    
+
     for my $key (@keys) {
         my $dir = $saveDir . '/' . $items{$key}{dir};
         if (-e $dir && -d $dir) {
@@ -190,18 +186,18 @@ sub main{
             mkdir $dir or die "ERROR: Cannot create $dir - $!!";
             say "$dir created!";
         }
-    
+
         say 'Working on bundle: ' . $items{$key}{name} . ' (key ' . $key . ')';
-    
+
         for my $book ( @{$items{$key}{books}} ) {
             my @downloads = @{$book->{downloads}};
 
-	    next if not @downloads;
+            next if not @downloads;
 
             my $filename = NameCleanUp( $book->{human_name} );
-    
+
             say "  Working on $filename -";
-    
+
             for my $download_href (@downloads) {
                 for my $file ( @{$download_href->{download_struct}} ) {
                     my $ext = lc $file->{name};
@@ -210,42 +206,43 @@ sub main{
                         say "    Skipping $ext";
                         next;
                     }
-    
+
                     say "    Working on $ext -";
-    
+
                     my $fullFilename = FixExtension($filename, $ext, $url);
                     my $save = "$dir/$fullFilename";
-    
+
                     if ( -e $save ) {
                         say "      File Exists!";
-    
+
                         # Check to see if we will skip this file download, because we already have it and it's good
                         if (CheckFileMD5($save, $file)) {
                             next;
                         }
                     }
-    
+
+                    # TODO: Don't download huge files to memory, but directly to disk instead
                     if ( defined $file->{file_size} && $file->{file_size} > $max_file_size ) {
-			error "Skipping file $filename version $ext was too big: " . $file->{human_size};
+                        error "Skipping file $filename version $ext was too big: " . $file->{human_size};
                         next;
                     }
-    
+
                     say "      downloading";
                     $ua->show_progress(1);
                     my $fileResponse = $ua->get($url);
                     if (!$fileResponse->is_success) {
-			error "GET failed for $fullFilename with " . $fileResponse->status_line;
+                        error "GET failed for $fullFilename with " . $fileResponse->status_line;
                         next;
                     }
-    
+
                     my $downloadedFile = $fileResponse->decoded_content( charset => 'none' );
                     my $md5HEX = md5_hex($downloadedFile);
-    
+
                     if ( $md5HEX eq $file->{md5} ) {
                         say "      md5 values match";
-    
+
                         unless(open SAVE, '>'. $save) {
-			    error "Cannot create save file '$save' - $!";
+                            error "Cannot create save file '$save' - $!";
                             next;
                         }
                         say "      Saving file: $fullFilename\n";
@@ -262,8 +259,7 @@ sub main{
             }
         }
     }
-    
-    # TODO keep track of failed files and report them rather than fail (allows downloading more files on failure)
+
     say "\n$nDownloaded files downloaded successfully.";
     say "$ERRORS{checked} files already existed and have the correct MD5.";
     say "$ERRORS{checkedFail} files failed the MD5 check and were redownloaded or skipped.";
@@ -274,7 +270,7 @@ sub main{
             say "   $complaint";
         }
     }
-    
+
     my $nErrors = scalar @{$ERRORS{list}};
     if ($nErrors > 0) {
         say "$nErrors files or keys skipped due to errors:";
@@ -283,7 +279,6 @@ sub main{
         }
     }
 
-}    
+}
 
 main();
-
