@@ -5,14 +5,14 @@ HumbleBundle is a great way to support charities and get some cool books/games i
 Right now, the perl script expects a file `.humblebundle.cfg` to be found in the current directory.  This file should look like this:
 
 ```
-saveDir: "/path/to/save/folder"
-sessionCookie: "RtWiGoxMjcyxZmkIjoiOTMzd9Jl1138d190... the value of the session cookie, see below"
+saveDir: '/path/to/save/folder'
+sessionCookie: 'RtWiGoxMjcyxZmkIjoiOTMzd9Jl1138d190... the value of the session cookie, see below'
 maxFileSize: 4294967296
 ```
 
 The download script currently downloads files into memory before checking the downloaded MD5 and creating a local file.  The maximum file size setting (in bytes) is used to prevent running out of memory and can be left out.  If left out, it defaults to 4 GB as shown in the example above.  The save directory and session cookie values are not optional.
 
-To get the session cookie value, log into the HumbleBundle web site in your browser, then hit the F12 key to open the JavaScript debugger/inspector (this works in most non-mobile browsers).  Look for the value of the cookie named `_simpleauth_sess`.  Copy the value of that cookie into the configuration file, making sure it is all on one line in the configuration file.
+To get the session cookie value, log into the HumbleBundle web site in your browser, then hit the F12 key to open the JavaScript debugger/inspector (this works in most non-mobile browsers).  Look for the value of the cookie named `_simpleauth_sess`.  Copy the value of that cookie into the configuration file, making sure it is all on one line in the configuration file and has SINGLE quotes around it.
 
 The save directory must exist before running the script.
 
